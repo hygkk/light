@@ -13,16 +13,18 @@ from sklearn.svm import SVC
 from sklearn.metrics import accuracy_score
 from sklearn.decomposition import PCA
 import argparse
-
+import time 
+import pdb
+import random
 '''
 SGD（下溢/轮次）
 '''
 
-d=300      # 词向量维度
+d=100      # 词向量维度
 k=2        # 正负样本比例
 alpha=0.75 # 负采样随机抽取中的指数
 window=4   
-
+learning_rate=0.0001
 
 def n_gram(tokens:list,window:int):
     ngram=[]
@@ -46,13 +48,27 @@ def get_data():
         for value in v.values():
             for i in value:
                 text+=i['text']+' '
-    tokens=word_tokenize(text) 
+    tokens=[]
+    for token in word_tokenize(text):
+        if '-' in token:
+            token=token.split('-')
+            for i in token:
+                if i:
+                    tokens.append(i)
+        elif '—' in token:
+            token=token.split('—')
+            for i in token:
+                if i:
+                    tokens.append(i)
+        else:
+            if i:
+                tokens.append(token)
     word_freq=FreqDist(tokens)
     n=len(word_freq)
     n_grams=n_gram(tokens,window)
     matrix=pd.DataFrame(np.zeros((2*n,d)))
     positive={}
-    negative={}
+    num=0
     for i in n_grams:
         word=i[0]
         context=i[1]
@@ -60,36 +76,71 @@ def get_data():
             positive[word]=set()
         if context not in positive[word]:
             positive[word].add(context)
+            num+=1
     tokens_set=set(tokens)
-    p=np.array([])
+    p=[]
     tokens=[]
     base=0
     for value in word_freq.values():
         base+=value**alpha
     for key in word_freq.keys():
         tokens.append(key)
-        p=np.append(p,word_freq[key]**alpha/base)
-
-
-    df=pd.DataFrame(columns=['w','c','+'])
+        p.append(word_freq[key]**alpha/base)
+    
+    df=[]
     for w in tokens_set:
         for c in positive[w]: 
-            df.loc[len(df)]=[w,c,1]
-        neg_n=0
-        while neg_n<k:
-            c=np.random.choice(tokens,p=p.ravel())
-            if c in positive[w] or c==w:
-                continue
-            else:
-                print([w,c])
-                df.loc[len(df)]=[w,c,0]
-                neg_n+=1
+            df.append([w,c,1])
+            neg_n=0
+            while neg_n<k:
+                c=random.choices(tokens)[0]
+                if c in positive[w] or c==w:
+                    continue
+                else:
+                    df.append([w,c,0])
+                    neg_n+=1
+    df=pd.DataFrame(df)
+    df.columns=['w','c','+']
     df.to_csv('data.txt')
     
 
+def sigmoid(x):
+    return 1/(1+np.exp(-x))
+
+
+def normalize(x):
+    return (x-np.min(x))/(np.max(x)-np.min(x))
+
 def word2vec():
-    df=pd.read_csv('data.txt')
-    print(df)
+    df=pd.read_csv('data.txt',index_col=0)
+    W={}
+    for i in df['w'].unique():
+        v=np.random.rand(d)
+        W[i]=normalize(v)
+    C=W
+    
+    for i in range(len(df)//3):
+        w=W[df.loc[3*i,'w']]
+        p=C[df.loc[3*i,'c']]
+        n=[]
+        # pdb.set_trace()
+        for j in range(k):
+            n.append(C[df.loc[3*i+1+j,'c']])
+        
+        W[df.loc[3*i,'w']]=normalize(w-learning_rate*(sigmoid(np.dot(p,w))-1)*p+sum([sigmoid(np.dot(item,w))*item for item in n])) # 更新w
+
+        C[df.loc[3*i,'c']]=normalize(p-learning_rate*(sigmoid(np.dot(p,w))-1)*w)   # 更新p
+        for j in range(k):  # 更新n
+            C[df.loc[3*i+1+j,'c']]=normalize(n[j]-learning_rate*sigmoid(np.dot(n[j],w))*w)
+    print(W)
+
+
+
+
+
+
+
+
 
 
 if __name__=='__main__':
